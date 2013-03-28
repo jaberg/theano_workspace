@@ -89,29 +89,27 @@ def logpy_cut_whole_incsubtensor(node):
 
     # -- use them in a pattern
     matches = run(0, rval,
-        logical_all(
-            eq(
-                node,
-                raw_init(theano.Apply,
-                    op=raw_init(tensor.IncSubtensor,
-                        idx_list=[slice(0, stop, step)],
-                        inplace=inplace,
-                        set_instead_of_inc=set_instead_of_inc,
-                        destroyhandler_tolerate_aliased=dta),
-                    inputs=[in_x, in_inc],
-                    outputs=outputs)
-                ),
-            membero(step, (1, None)),
-            match_shape_i(shape_of, in_x, 0, stop),
-            conde(
-                [
-                    eq(set_instead_of_inc, True),
-                    eq(rval, (tensor.add, in_inc))],
-                [
-                    eq(set_instead_of_inc, False),
-                    eq(rval, (tensor.add, in_x, in_inc))]
-                ),
-            )
+        eq(
+            node,
+            raw_init(theano.Apply,
+                op=raw_init(tensor.IncSubtensor,
+                    idx_list=[slice(0, stop, step)],
+                    inplace=inplace,
+                    set_instead_of_inc=set_instead_of_inc,
+                    destroyhandler_tolerate_aliased=dta),
+                inputs=[in_x, in_inc],
+                outputs=outputs)
+            ),
+        membero(step, (1, None)),
+        match_shape_i(shape_of, in_x, 0, stop),
+        conde(
+            [
+                eq(set_instead_of_inc, True),
+                eq(rval, (tensor.add, in_inc))],
+            [
+                eq(set_instead_of_inc, False),
+                eq(rval, (tensor.add, in_x, in_inc))]
+            ),
         )
     if matches:
         return [matches[0][0](*matches[0][1:])]
