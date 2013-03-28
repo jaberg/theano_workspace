@@ -2,7 +2,7 @@ import unittest
 import numpy as np
 import theano
 from theano import tensor
-from workspace import Workspace, SharedStorageWorkspace
+from theano_workspace.workspace import Workspace, SharedStorageWorkspace
 
 class StdMixins(object):
     def test_scaffolding(self):
