@@ -79,42 +79,40 @@ def match_shape_i(shape_of, x, i, shp_i):
 @register_canonicalize
 @local_optimizer()
 def logpy_cut_whole_incsubtensor(node):
-    if not isinstance(node.op, tensor.IncSubtensor):
-        return
-
     # -- declare some wild variables
-    w = dict((name, var(name)) for name in [
-        'start', 'stop', 'step', 'set_instead_of_inc', 'inplace', 'dta',
-        'in_x', 'in_inc', 'outputs', 'rval',
-        ])
+    rval, outputs, in_inc, in_x = [var() for i in [0] * 4]
+    start, stop, step = [var() for i in [0] * 3]
+    set_instead_of_inc, inplace, dta = [var() for i in [0] * 3]
 
+    # -- ugly but necessary?
     shape_of = node.fgraph.shape_feature.shape_of
 
     # -- use them in a pattern
-    matches = run(0, w,
+    matches = run(0, rval,
         logical_all(
             eq(
                 node,
                 raw_init(theano.Apply,
                     op=raw_init(tensor.IncSubtensor,
-                        idx_list=[slice(0, w['stop'], w['step'])],
-                        inplace=w['inplace'],
-                        set_instead_of_inc=w['set_instead_of_inc'],
-                        destroyhandler_tolerate_aliased=w['dta']),
-                    inputs=[w['in_x'], w['in_inc']],
-                    outputs=w['outputs'])
+                        idx_list=[slice(0, stop, step)],
+                        inplace=inplace,
+                        set_instead_of_inc=set_instead_of_inc,
+                        destroyhandler_tolerate_aliased=dta),
+                    inputs=[in_x, in_inc],
+                    outputs=outputs)
                 ),
-            membero(w['step'], (1, None)),
-            match_shape_i(shape_of, w['in_x'], 0, w['stop']),
+            membero(step, (1, None)),
+            match_shape_i(shape_of, in_x, 0, stop),
             conde(
                 [
-                    eq(w['set_instead_of_inc'], True),
-                    eq(w['rval'], (tensor.add, w['in_inc']))],
+                    eq(set_instead_of_inc, True),
+                    eq(rval, (tensor.add, in_inc))],
                 [
-                    eq(w['set_instead_of_inc'], False),
-                    eq(w['rval'], (tensor.add, w['in_x'], w['in_inc']))]
+                    eq(set_instead_of_inc, False),
+                    eq(rval, (tensor.add, in_x, in_inc))]
                 ),
             )
         )
     if matches:
-        return [matches[0]['rval'][0](*matches[0]['rval'][1:])]
+        return [matches[0][0](*matches[0][1:])]
+
