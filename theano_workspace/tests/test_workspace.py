@@ -1,5 +1,8 @@
+import functools
 import unittest
+
 import numpy as np
+
 import theano
 from theano import tensor
 from theano_workspace.workspace import Workspace, SharedStorageWorkspace
@@ -58,7 +61,7 @@ class SwapGraph(unittest.TestCase, StdMixins):
         assert np.allclose([ws[x], ws[y]],[[1, 2], [3, 4]]), (ws[x], ws[y])
 
 
-class MergeGraph(unittest.TestCase, StdMixins):
+class MergeGraph2(unittest.TestCase, StdMixins):
     n_groups = 2
     n_items = 2
     def setUp(self):
@@ -123,14 +126,15 @@ class MergeGraph(unittest.TestCase, StdMixins):
                 self.n_groups, self.n_items, min(ws_shrd_times))
 
 
-class MergeGraph5(MergeGraph):
+class MergeGraph5(MergeGraph2):
     n_groups = 5
 
-class MergeGraph26_50(MergeGraph):
+class MergeGraph26_50(MergeGraph2):
     n_groups = 26
     n_items = 50
 
-class MergeGraph26_1000(MergeGraph):
+class MergeGraph26_1000(MergeGraph2):
     n_groups = 26
     n_items = 1000
+
 
