@@ -319,8 +319,8 @@ def local_consolidate_incsubtensor(node):
     return [rval]
 
 
-@register_specialize
-@register_canonicalize
+#@register_specialize
+#@register_canonicalize
 @local_optimizer()
 def local_cut_whole_incsubtensor(node):
     # TODO: template works only for vectors, because of reshape varargs
