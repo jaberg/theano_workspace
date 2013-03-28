@@ -319,38 +319,3 @@ def local_consolidate_incsubtensor(node):
     return [rval]
 
 
-#@register_specialize
-#@register_canonicalize
-@local_optimizer()
-def local_cut_whole_incsubtensor(node):
-    # TODO: template works only for vectors, because of reshape varargs
-    match_inc_subtensor = Match('is1', IncSubtensor, idx_list='i1', set_instead_of_inc='s/i')
-    template = match_inc_subtensor('x', 'inc_val')
-
-    shape_of = node.fgraph.shape_feature.shape_of
-
-    assignment = template.match(node, {})
-    if assignment:
-        # print assignment
-        i1 = assignment['i1']
-        x = assignment['x']
-        try:
-            x_len = get_scalar_constant_value(shape_of[x][0])
-        except NotScalarConstantError:
-            # can happen before constant-folding?
-            #print "Not a scalar constant??"
-            #debugprint(shape_of[x][0])
-            #print '-- shape of'
-            #debugprint(x)
-            return
-        inc_val = assignment['inc_val']
-        if (len(i1) == 1
-                and isinstance(i1[0], slice)
-                and i1[0].start == 0
-                and i1[0].stop == x_len
-                and i1[0].step in (1, None)):
-            if assignment['s/i']:
-                return [assignment['inc_val']]
-            else:
-                return [assignment['inc_val'] + x]
-
