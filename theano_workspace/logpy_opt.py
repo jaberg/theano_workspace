@@ -50,6 +50,7 @@ def raw_init(cls, **kwargs):
     return rval
 
 def match_shape_i(shape_of, x, i, shp_i):
+
     def goal_shape(s):
         # figure out how to call reify and unify here
         # to make it a proper goal
@@ -80,6 +81,7 @@ def match_shape_i(shape_of, x, i, shp_i):
 def logpy_cut_whole_incsubtensor(node):
     if not isinstance(node.op, tensor.IncSubtensor):
         return
+
     # -- declare some wild variables
     w = dict((name, var(name)) for name in [
         'start', 'stop', 'step', 'set_instead_of_inc', 'inplace', 'dta',
