@@ -196,27 +196,61 @@ class Workspace(object):
         for key in other:
             self[key] = other[key]
 
-    # XXX unfortunate name!
-    # -- since Workspace is like a value dictionary, "update" is defined by
-    #    Python convention to mean a dictionary update.
-    def compile_update(self, key, updated_vars, optimizer=None):
-        """
+    def add_method(self, name,
+        inputs=None,
+        outputs=None,
+        updates=None,
+        givens=None,
+        optimizer=None,
+        ):
+        """Add a theano function as self.<name>
 
-        Return a function that will update this workspaces
-        values for keys according to `exprs`
+        Parameters
+        ----------
+        updates - a sequence of `(dest, expr)` pairs of theano variables
+            When this function is called, it will update each workspace
+            variable `dest` with the value computed for corresponding symbolic
+            variable `expr`.
 
         """
-        ufgraph = UpdateFGraph(updated_vars)
+        if inputs or outputs or givens:
+            raise NotImplementedError()
+
+        if not updates:
+            raise NotImplementedError()
+
+        ufgraph = UpdateFGraph(updates)
         if optimizer:
             ufgraph.optimize(optimizer)
         cu = CompiledUpdate(ufgraph, self.vals_memo)
-        self.compiled_updates[key] = cu
+        return self._add_compiled_update(name, cu)
+
+    def _add_compiled_update(self, name, cu):
+        self.compiled_updates[name] = cu
+        setattr(self, name, cu)
         return cu
 
-    def run_update(self, key):
-        self.compiled_updates[key]()
+    def optimize(self, arg=None):
+        """Convenient driver for various optimizations.
 
-    def optimize(self, specifier):
+        The idea is to take time up front but reduce the average runtime of
+        the methods (see `add_method()`) for future calls, assuming they
+        continue to be used as they have been used so far.
+
+        """
+        # N.B. don't put too much effort into making this interface powerful
+        # if a user wants more direct control over the optimizations, then
+        # they should user a lower-level interface.
+        self.optimize_storage()
+        self.optimize_methods(arg)
+
+    def optimize_storage(self):
+        """Revise physical layout of values to enable faster methods.
+        """
+
+    def optimize_methods(self, specifier='fast_run'):
+        """Recompile methods so they run faster, if possible.
+        """
         optimizer = optimizer_from_any(specifier)
         for key, cu in self.compiled_updates.items():
             optimizer.apply(cu.ufgraph.fgraph)
@@ -224,6 +258,8 @@ class Workspace(object):
             self.compiled_updates[key] = cu_opt
 
 
+# XXX should this be a separate class, or just merged into the Workspace?
+#     or maybe some kind of mix-in?
 class SharedStorageWorkspace(Workspace):
     def __init__(self, ws):
         Workspace.__init__(self)
@@ -254,7 +290,7 @@ class SharedStorageWorkspace(Workspace):
                 self.vals_memo[var] = copy.deepcopy(ws.vals_memo[var])
 
         for fname, f in ws.compiled_updates.items():
-            self.compile_update(fname, f.ufgraph.updated_vars)
+            self.add_method(fname, updates=f.ufgraph.updated_vars)
 
     def __contains__(self, key):
         return key in self.vals_memo or key in self.views_memo
@@ -278,23 +314,29 @@ class SharedStorageWorkspace(Workspace):
             else:
                 self.vals_memo[key] = [filtered_val]
 
-    def compile_update(self, key, updated_vars):
-        noview_updated_vars = dict() #XXX want ordered-dict here
-        for dst, out in updated_vars:
+    def add_method(self, name,
+        inputs=None,
+        outputs=None,
+        updates=None,
+        givens=None,
+        optimizer=None,
+        ):
+        noview_updates = dict() #XXX want ordered-dict here
+        for dst, out in updates:
             if dst in self.views_memo:
                 var, offset, n_elems = self.views_memo[dst]
                 # -- build the shape into the graph
                 #shp = self.vals_memo[var][0].shape
                 # print 'shp', shp
-                upvar = noview_updated_vars.get(var, var)
+                upvar = noview_updates.get(var, var)
                 upvar = theano.tensor.set_subtensor(
                         upvar[offset: offset + n_elems],
                         out)
-                noview_updated_vars[var] = upvar
+                noview_updates[var] = upvar
             else:
-                if dst in noview_updated_vars:
+                if dst in noview_updates:
                     raise ValueError('duplicate destination', updated_vals)
-                noview_updated_vars[dst] = out
+                noview_updates[dst] = out
 
         givens = []
         for var in self.views_memo:
@@ -303,9 +345,8 @@ class SharedStorageWorkspace(Workspace):
             svar = Hint(shape=shp)(svar)
             givens.append((var, svar[offset: offset + n_elems]))
 
-        ufgraph = UpdateFGraph(noview_updated_vars.items(), givens=givens)
+        ufgraph = UpdateFGraph(noview_updates.items(), givens=givens)
         cu = CompiledUpdate(ufgraph, self.vals_memo)
-        self.compiled_updates[key] = cu
-        return cu
 
+        return self._add_compiled_update(name, cu)
 

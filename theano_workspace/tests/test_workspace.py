@@ -21,18 +21,16 @@ class SimpleGraph(unittest.TestCase, StdMixins):
         ws = Workspace()
         ws[x] = [1, 2]
         ws[y] = [3, 4]
-        ws.compile_update('f', [
-            (x, 2 * x),
-            (y, x + y)])
+        ws.add_method('f', updates=[(x, 2 * x), (y, x + y)])
         self.foo = x, y, ws
 
     def tearDown(self):
         x, y, ws = self.foo
 
         assert np.allclose([ws[x], ws[y]],[[1, 2], [3, 4]]), (ws[x], ws[y])
-        ws.run_update('f')
+        ws.f()
         assert np.allclose([ws[x], ws[y]],[[2, 4], [4, 6]]), (ws[x], ws[y])
-        ws.run_update('f')
+        ws.f()
         assert np.allclose([ws[x], ws[y]],[[4, 8], [6, 10]]), (ws[x], ws[y])
 
 
@@ -44,19 +42,19 @@ class SwapGraph(unittest.TestCase, StdMixins):
         ws = Workspace()
         ws[x] = [1, 2]
         ws[y] = [3, 4]
-        ws.compile_update('f', [(x, y), (y, x)])
+        ws.add_method('f', updates=[(x, y), (y, x)])
         self.foo = x, y, ws
 
     def tearDown(self):
         x, y, ws = self.foo
         assert np.allclose([ws[x], ws[y]],[[1, 2], [3, 4]]), (ws[x], ws[y])
-        ws.run_update('f')
+        ws.f()
         assert np.allclose([ws[x], ws[y]],[[3, 4], [1, 2]]), (ws[x], ws[y])
-        ws.run_update('f')
+        ws.f()
         assert np.allclose([ws[x], ws[y]],[[1, 2], [3, 4]]), (ws[x], ws[y])
-        ws.run_update('f')
+        ws.f()
         assert np.allclose([ws[x], ws[y]],[[3, 4], [1, 2]]), (ws[x], ws[y])
-        ws.run_update('f')
+        ws.f()
         assert np.allclose([ws[x], ws[y]],[[1, 2], [3, 4]]), (ws[x], ws[y])
 
 
@@ -71,7 +69,7 @@ class MergeGraph(unittest.TestCase, StdMixins):
         ws = Workspace()
         for i, s in enumerate(symbols):
             ws[s] = range(i, i + self.n_items)
-        f = ws.compile_update('f', [(s, 2 * s) for s in symbols])
+        f = ws.add_method('f', updates=[(s, 2 * s) for s in symbols])
 
         ws_shrd = SharedStorageWorkspace(ws)
         f_opt = ws_shrd.compiled_updates['f']
@@ -85,10 +83,10 @@ class MergeGraph(unittest.TestCase, StdMixins):
             ivals = [np.array(w[s]) for s in symbols]
             for i, s in enumerate(symbols):
                 assert np.allclose(w[s], ivals[i])
-            w.run_update('f')
+            w.f()
             for i, s in enumerate(symbols):
                 assert np.allclose(w[s], 2 * ivals[i]), (w[s], 2 * ivals[i])
-            w.run_update('f')
+            w.f()
             for i, s in enumerate(symbols):
                 assert np.allclose(w[s], 4 * ivals[i]), (w[s], 4 * ivals[i])
 
@@ -113,7 +111,7 @@ class MergeGraph(unittest.TestCase, StdMixins):
             times = []
             for i in range(100):
                 t0 = time.time()
-                w.run_update('f')
+                w.f()
                 t1 = time.time()
                 times.append(t1 - t0)
             return times
