@@ -12,7 +12,8 @@ from logpy import (
     conde,
     run,
     var,
-    membero
+    membero,
+    goalify,
     )
 from logpy.core import (
     lall as logical_all,
@@ -49,31 +50,13 @@ def raw_init(cls, **kwargs):
     rval.__dict__.update(kwargs)
     return rval
 
-def match_shape_i(shape_of, x, i, shp_i):
-
-    def goal_shape(s):
-        # figure out how to call reify and unify here
-        # to make it a proper goal
-        if hasattr(x, 'token'):
-            x_ = s[x]
-        else:
-            x_ = x
-        if hasattr(i, 'token'):
-            i_ = s[i]
-        else:
-            i_ = i
-        if hasattr(shp_i, 'token'):
-            shp_i_ = s[shp_i]
-        else:
-            shp_i_ = shp_i
+def shape_dim(shape_of):
+    def shape_dim_i(x, i):
         try:
-            zval = int(get_scalar_constant_value(shape_of[x_][i_]))
+            return int(get_scalar_constant_value(shape_of[x][i]))
         except NotScalarConstantError:
-            return []
-        if zval == shp_i_:
-            return [s]
-        return []
-    return goal_shape
+            raise EarlyGoalError()
+    return shape_dim_i
 
 @register_specialize
 @register_canonicalize
@@ -83,9 +66,10 @@ def logpy_cut_whole_incsubtensor(node):
     rval, outputs, in_inc, in_x = [var() for i in [0] * 4]
     start, stop, step = [var() for i in [0] * 3]
     set_instead_of_inc, inplace, dta = [var() for i in [0] * 3]
+    x_shpdim = var()
 
-    # -- ugly but necessary?
-    shape_of = node.fgraph.shape_feature.shape_of
+    shape_dimo = goalify(
+        shape_dim(node.fgraph.shape_feature.shape_of))
 
     # -- use them in a pattern
     matches = run(0, rval,
@@ -101,7 +85,8 @@ def logpy_cut_whole_incsubtensor(node):
                 outputs=outputs)
             ),
         membero(step, (1, None)),
-        match_shape_i(shape_of, in_x, 0, stop),
+        (eq, x_shpdim, (in_x, 0)),
+        (shape_dimo, x_shpdim, stop),
         conde(
             [
                 eq(set_instead_of_inc, True),
