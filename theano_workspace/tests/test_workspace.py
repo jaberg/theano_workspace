@@ -102,7 +102,8 @@ class MergeGraph2(unittest.TestCase, StdMixins):
         ws_shrd = self.foo[3]
         ws_shrd.optimize('fast_run')
         fgraph = ws_shrd.compiled_updates['f'].ufgraph.fgraph
-        assert len(fgraph.toposort()) <= 4, len(fgraph.toposort())
+        theano.printing.debugprint(fgraph.outputs)
+        assert len(fgraph.toposort()) <= 2, len(fgraph.toposort())
 
     def test_timeit(self):
         import time
