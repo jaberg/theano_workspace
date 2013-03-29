@@ -121,10 +121,12 @@ class UpdateFGraph(object):
 
 class CompiledUpdate(object):
     def __init__(self, ufgraph, vals_memo, profiler=None, **VM_Linker_kwargs):
+        VM_Linker_kwargs.setdefault('use_cloop', True)
+        VM_Linker_kwargs.setdefault('allow_gc', False)
 
         # -- create a VM to run the updates
         #    XXX CVM is necessary here until LoopGC implements updates
-        linker = VM_Linker(use_cloop=False, allow_gc=False, **VM_Linker_kwargs)
+        linker = VM_Linker(**VM_Linker_kwargs)
         no_recycling = infer_reuse_pattern(ufgraph.fgraph, ufgraph.fgraph.outputs)
         linker.accept(ufgraph.fgraph, no_recycling=no_recycling)
         linker.accept_var_updates(dict(zip(
