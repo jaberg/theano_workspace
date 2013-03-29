@@ -27,17 +27,24 @@ from logpy.variables import (
     )
 
 from logpy.unify import(
-    register_unify_object,
-    register_unify_object_attrs,
     reify,
     reify_dispatch,
     reify_generator,
-    reify_object,
     unify_dispatch,
-    unify_object,
-    unify_object_attrs,
     unify,
     )
+
+from logpy.unifymore import(
+    register_unify_object,
+    register_unify_object_attrs,
+    reify_object,
+    unify_object,
+    unify_object_attrs,
+    more_unify_dispatch,
+    more_reify_dispatch,
+    )
+
+unify_dispatch.update(more_unify_dispatch)
 
 # XXX  need context manager to get rid of this
 if 1: # DEBUGGING W OPS BUILT WITH RAW_INIT

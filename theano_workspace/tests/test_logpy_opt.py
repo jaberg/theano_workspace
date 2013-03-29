@@ -6,8 +6,29 @@ import logpy
 from logpy import (
     eq,
     run,
-    var,
+    var, isvar
     )
+
+from logpy.variables import variables
+
+def test_context_manager():
+    x = tensor.vector()
+    y = tensor.vector()
+    z = tensor.inc_subtensor(x[1:3], y)
+    node = z.owner
+
+    xp = tensor.vector()
+    yp = tensor.vector()
+    zp = tensor.inc_subtensor(xp[1:1234], yp)
+    pattern = zp.owner
+
+    vars = (1234, xp, yp)
+
+    with variables(*vars):
+        match, = run(0, vars, (eq, node, pattern))
+
+    assert match == (3, x, y)
+
 
 def test_logpy():
     x = tensor.vector()
