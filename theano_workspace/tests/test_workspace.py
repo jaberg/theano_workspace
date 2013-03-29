@@ -73,6 +73,9 @@ class MergeGraph2(unittest.TestCase, StdMixins):
         for i, s in enumerate(symbols):
             ws[s] = range(i, i + self.n_items)
         f = ws.add_method('f', updates=[(s, 2 * s) for s in symbols])
+        # XXX set up a new test with this update, because it seems
+        # to break the optimizations
+        #f = ws.add_method('f', updates=[(s, tensor.log(2 + tensor.cos(s))) for s in symbols])
 
         ws_shrd = SharedStorageWorkspace(ws)
         f_opt = ws_shrd.compiled_updates['f']
