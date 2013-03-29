@@ -2,6 +2,7 @@ from theano_workspace.logpy_opt import raw_init
 import theano
 from theano import tensor
 
+import logpy
 from logpy import (
     eq,
     run,
@@ -39,3 +40,25 @@ def test_logpy():
     assert match['stop'] == 3
     assert match['inputs'] == [x, y]
 
+
+def test_slice_sanity():
+    class Foo(int, object):
+        def __eq__(self, other):
+            return False
+
+    class Bar(int, logpy.variables.Var):
+        # put these built-ins up front to hide int versions
+        def __str__(self):
+            return "~" + str(self.token)
+        __repr__ = __str__
+
+        def __eq__(self, other):
+            return type(self) == type(other) and self.token == other.token
+
+    def __hash__(self):
+        return hash((type(self), self.token))
+
+    assert not slice(1) == slice(Foo())
+    bar = Bar(4)
+    bar.token = 'hello'
+    assert not slice(5) == slice(bar)
