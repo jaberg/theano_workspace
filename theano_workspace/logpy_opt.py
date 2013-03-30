@@ -24,19 +24,18 @@ from logpy.core import (
 from logpy.variables import (
     Var,
     vars,
+    variables,
     )
 
 from logpy.unify import(
     reify,
-    reify_dispatch,
     reify_generator,
     unify_dispatch,
     unify,
     )
 
 from logpy.unifymore import(
-    register_unify_object,
-    register_unify_object_attrs,
+    register_object_attrs,
     reify_object,
     unify_object,
     unify_object_attrs,
@@ -51,12 +50,11 @@ if 1: # DEBUGGING W OPS BUILT WITH RAW_INIT
     theano.gof.Apply.__repr__ = object.__repr__
     theano.gof.Apply.__str__ = object.__str__
 
-register_unify_object_attrs(theano.Apply, ['op', 'inputs'])
-register_unify_object_attrs(tensor.TensorVariable, ['type', 'owner'])
-register_unify_object_attrs(tensor.IncSubtensor, [
+register_object_attrs(theano.Apply, ['op', 'inputs'])
+register_object_attrs(tensor.TensorVariable, ['type', 'owner', 'name'])
+register_object_attrs(tensor.IncSubtensor, [
     'idx_list', 'inplace', 'set_instead_of_inc',
     'destroyhandler_tolerate_aliased'])
-
 
 
 def raw_init(cls, **kwargs):
@@ -160,3 +158,24 @@ def logpy_cut_whole_incsubtensor(node):
             )
     return rval, goals
 
+from logpy import fact, Relation
+
+x = tensor.vector('x')
+from theano.tensor import exp, log
+rules = [
+        (x + x, 2*x),
+        (x * x, x**2),
+        (exp(log(x)), x),
+        (log(exp(x)), x),
+        ]
+vars = [x]
+reduces = Relation('reduces')
+for source, target in rules:
+    fact(reduces, source, target)
+
+def simplify(expr):
+    source, target = var(), var()
+    with variables(*vars):
+        result = run(0, target, (reduces, source, target),
+                                (eq, expr, source))
+    return result

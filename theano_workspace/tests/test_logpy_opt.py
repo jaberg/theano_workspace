@@ -1,4 +1,4 @@
-from theano_workspace.logpy_opt import raw_init
+from theano_workspace.logpy_opt import raw_init, simplify
 import theano
 from theano import tensor
 
@@ -15,19 +15,36 @@ def test_context_manager():
     x = tensor.vector()
     y = tensor.vector()
     z = tensor.inc_subtensor(x[1:3], y)
-    node = z.owner
 
     xp = tensor.vector()
     yp = tensor.vector()
     zp = tensor.inc_subtensor(xp[1:1234], yp)
-    pattern = zp.owner
 
     vars = (1234, xp, yp)
 
     with variables(*vars):
-        match, = run(0, vars, (eq, node, pattern))
+        match, = run(0, vars, (eq, z, zp))
 
     assert match == (3, x, y)
+
+
+def theq(a, b):
+    """ Theano equality - compare by string representation """
+    sa = theano.printing.debugprint(a, file='str')
+    sb = theano.printing.debugprint(b, file='str')
+
+    if sa==sb:
+        return True
+    else:
+        print sa
+        print sb
+        return False
+
+def test_simplify():
+    y = tensor.vector('y')
+    assert theq(simplify(y+y)[0], 2*y)
+    assert theq(simplify(y*y)[0], y**2)
+    assert theq(simplify(tensor.exp(tensor.log(y**3)))[0], y**3)
 
 
 def test_logpy():
