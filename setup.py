@@ -68,7 +68,7 @@ if __name__ == "__main__":
           download_url=DOWNLOAD_URL,
           long_description=LONG_DESCRIPTION,
           zip_safe=True,  # the package can run out of an .egg file
-          install_requires=['theano', 'sympy', 'numpy', 'scipy'],
+          install_requires=['theano', 'numpy', 'scipy'],
           scripts=glob.glob(os.path.join("bin","*")),
           classifiers=[
               'Intended Audience :: Science/Research',
