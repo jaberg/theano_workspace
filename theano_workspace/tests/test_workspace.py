@@ -73,6 +73,9 @@ class MergeGraph2(unittest.TestCase, StdMixins):
         for i, s in enumerate(symbols):
             ws[s] = range(i, i + self.n_items)
         f = ws.add_method('f', updates=[(s, 2 * s) for s in symbols])
+        # XXX set up a new test with this update, because it seems
+        # to break the optimizations
+        #f = ws.add_method('f', updates=[(s, tensor.log(2 + tensor.cos(s))) for s in symbols])
 
         ws_shrd = SharedStorageWorkspace(ws)
         f_opt = ws_shrd.compiled_updates['f']
@@ -103,13 +106,15 @@ class MergeGraph2(unittest.TestCase, StdMixins):
         ws_shrd.optimize('fast_run')
         fgraph = ws_shrd.compiled_updates['f'].ufgraph.fgraph
         theano.printing.debugprint(fgraph.outputs)
-        assert len(fgraph.toposort()) <= 4, len(fgraph.toposort())
+        assert len(fgraph.toposort()) <= 2, len(fgraph.toposort())
 
     def test_timeit(self):
         import time
         ws, ws_shrd = self.foo[2:]
         ws.optimize('fast_run')
         ws_shrd.optimize('fast_run')
+        fgraph = ws_shrd.compiled_updates['f'].ufgraph.fgraph
+        theano.printing.debugprint(fgraph.outputs)
         def time_ws(w):
             times = []
             for i in range(100):
@@ -122,7 +127,7 @@ class MergeGraph2(unittest.TestCase, StdMixins):
         ws_shrd_times = time_ws(ws_shrd)
         print 'n_groups=%s n_items=%s orig min %f' % (
                 self.n_groups, self.n_items, min(ws_times))
-        print 'n_groups=%s n_items=%s orig min %f' % (
+        print 'n_groups=%s n_items=%s shrd min %f' % (
                 self.n_groups, self.n_items, min(ws_shrd_times))
 
 
