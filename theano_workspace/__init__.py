@@ -1,5 +1,6 @@
-from workspace import Workspace
-import opt
 import logpy_opt
-#from function import Function
+import opt
+import workspace
 
+from wsopt import optimize, optimize_methods, optimize_storage
+from workspace import SimpleWorkspace

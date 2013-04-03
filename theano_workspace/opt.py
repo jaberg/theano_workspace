@@ -12,7 +12,19 @@ Reshape = theano.tensor.Reshape
 from theano.tensor.basic import get_scalar_constant_value
 from theano.tensor.basic import NotScalarConstantError
 
-from workspace import Workspace
+
+def optimizer_from_any(specifier):
+    if isinstance(specifier, basestring):
+        try:
+            dct = theano.compile.mode.predefined_optimizers
+            query = dct[specifier]
+        except KeyError:
+            raise ValueError('Optimizer %s not in %s' % (
+                specifier, dct))
+        return theano.compile.mode.optdb.query(query)
+    else:
+        # TODO probably not implemented error is more appropriate
+        raise TypeError(specifier)
 
 
 class RefactorSubtensors(Optimizer):

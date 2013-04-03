@@ -12,20 +12,7 @@ from theano.printing import debugprint
 from theano.sandbox.linalg.ops import Hint
 from theano.sandbox.linalg.ops import is_hint_node
 
-
-def optimizer_from_any(specifier):
-    if isinstance(specifier, basestring):
-        try:
-            dct = theano.compile.mode.predefined_optimizers
-            query = dct[specifier]
-        except KeyError:
-            raise ValueError('Optimizer %s not in %s' % (
-                specifier, dct))
-        return theano.compile.mode.optdb.query(query)
-    else:
-        # TODO probably not implemented error is more appropriate
-        raise TypeError(specifier)
-
+from opt import optimizer_from_any
 
 class UpdateFGraph(object):
     def __init__(self, updated_vars, givens=None):
@@ -39,7 +26,8 @@ class UpdateFGraph(object):
         #    double-buffering going on, because actually dests and outputs can
         #    include some of the same variables (e.g. swap values)
         dests, outputs = zip(*updated_vars)
-        unique_outputs = map(deep_copy_op, outputs)
+        #unique_outputs = map(deep_copy_op, outputs)
+        unique_outputs = outputs
 
         # -- partial graph clone to use givens
         stuff = rebuild_collect_shared(
@@ -155,7 +143,7 @@ class CompiledUpdate(object):
         return self.vm()
 
 
-class Workspace(object):
+class SimpleWorkspace(object):
     """
 
     This workspace is meant to be serializable, at least before it has been
@@ -223,7 +211,8 @@ class Workspace(object):
 
         ufgraph = UpdateFGraph(updates)
         if optimizer:
-            ufgraph.optimize(optimizer)
+            optimizer = optimizer_from_any(optimizer)
+            optimizer.apply(ufgraph.fgraph)
         cu = CompiledUpdate(ufgraph, self.vals_memo)
         return self._add_compiled_update(name, cu)
 
@@ -236,42 +225,10 @@ class Workspace(object):
         setattr(self, name, cu)
         return cu
 
-    # XXX make these functions not methods
-    def optimize(self, arg=None):
-        """Convenient driver for various optimizations.
 
-        The idea is to take time up front but reduce the average runtime of
-        the methods (see `add_method()`) for future calls, assuming they
-        continue to be used as they have been used so far.
-
-        """
-        # N.B. don't put too much effort into making this interface powerful
-        # if a user wants more direct control over the optimizations, then
-        # they should user a lower-level interface.
-        self.optimize_storage()
-        self.optimize_methods(arg)
-
-    # XXX make these functions not methods
-    def optimize_storage(self):
-        """Revise physical layout of values to enable faster methods.
-        """
-
-    # XXX make these functions not methods
-    def optimize_methods(self, specifier='fast_run'):
-        """Recompile methods so they run faster, if possible.
-        """
-        optimizer = optimizer_from_any(specifier)
-        for key, cu in self.compiled_updates.items():
-            optimizer.apply(cu.ufgraph.fgraph)
-            cu_opt = CompiledUpdate(cu.ufgraph, self.vals_memo)
-            self.compiled_updates[key] = cu_opt
-
-
-# XXX should this be a separate class, or just merged into the Workspace?
-#     or maybe some kind of mix-in?
-class SharedStorageWorkspace(Workspace):
+class ViewWorkspace(SimpleWorkspace):
     def __init__(self, ws):
-        Workspace.__init__(self)
+        SimpleWorkspace.__init__(self)
 
         self.views_memo = {}
 
