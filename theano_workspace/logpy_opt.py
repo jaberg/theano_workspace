@@ -35,7 +35,7 @@ from logpy.unify import(
     )
 
 from logpy.unifymore import(
-    register_object_attrs,
+    register_unify_object_attrs,
     reify_object,
     unify_object,
     unify_object_attrs,
@@ -50,9 +50,9 @@ if 1: # DEBUGGING W OPS BUILT WITH RAW_INIT
     theano.gof.Apply.__repr__ = object.__repr__
     theano.gof.Apply.__str__ = object.__str__
 
-register_object_attrs(theano.Apply, ['op', 'inputs'])
-register_object_attrs(tensor.TensorVariable, ['type', 'owner', 'name'])
-register_object_attrs(tensor.IncSubtensor, [
+register_unify_object_attrs(theano.Apply, ['op', 'inputs'])
+register_unify_object_attrs(tensor.TensorVariable, ['type', 'owner', 'name'])
+register_unify_object_attrs(tensor.IncSubtensor, [
     'idx_list', 'inplace', 'set_instead_of_inc',
     'destroyhandler_tolerate_aliased'])
 
