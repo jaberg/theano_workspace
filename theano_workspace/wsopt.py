@@ -12,7 +12,7 @@ def optimize_methods(ws, graph_opts='fast_run'):
     for key, cu in ws.compiled_updates.items():
         optimizer.apply(cu.ufgraph.fgraph)
         cu_opt = CompiledUpdate(cu.ufgraph, ws.vals_memo)
-        ws.compiled_updates[key] = cu_opt
+        ws._add_compiled_update(key, cu_opt)
     return ws
 
 

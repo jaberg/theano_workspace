@@ -1,5 +1,6 @@
 import copy
 import sys
+import time
 
 import numpy as np
 
@@ -107,6 +108,11 @@ class UpdateFGraph(object):
         self.fgraph = fgraph
 
 
+# TODO implement different CompiledUpdate base classes for special cases
+# -- profiler
+# -- outputs that must be unpacked / grouped into structure
+# -- inputs that must be filtered etc.
+# Do not try to do everything in one class like theano.Function.
 class CompiledUpdate(object):
     def __init__(self, ufgraph, vals_memo, profiler=None, **VM_Linker_kwargs):
         VM_Linker_kwargs.setdefault('use_cloop', True)
@@ -124,23 +130,45 @@ class CompiledUpdate(object):
         input_storage = [vals_memo[i] if i in vals_memo else [i.data]
                 for i in ufgraph.all_inputs]
 
-        vm, input_containers, output_containers, thunks, order = linker.make_all(
-            profiler=profiler,
-            input_storage=input_storage,
-            )
-
         self.ufgraph = ufgraph
         self.vals_memo = vals_memo
         self.input_storage = input_storage
+        self.linker = linker
+        self.profiler = profiler  # -- sets vm, etc.
+
+    def _get_profiler(self):
+        return self._profiler
+
+    def _set_profiler(self, profiler):
+        make_all = self.linker.make_all
+        vm, input_containers, output_containers, thunks, order = make_all(
+            profiler=profiler,
+            input_storage=self.input_storage,
+            )
         self.vm = vm
         self.input_containers = input_containers
         self.output_containers = output_containers
         self.thunks = thunks
         self.order = order
+        self._profiler = profiler
+
+
+    profiler = property(_get_profiler, _set_profiler)
 
     def __call__(self):
         # if profiler then we need to update it (see function_module.py:641)
-        return self.vm()
+        if self.profiler:
+            prof = self.profiler
+            t0 = time.time()
+            self.vm()
+            t1 = time.time()
+            prof.vm_call_time += t1 - t0
+            prof.fct_call_time += t1 - t0  # -- meant to include arg stuff
+            prof.fct_callcount += 1
+            if hasattr(self.vm, 'update_profile'):
+                self.vm.update_profile(prof)
+        else:
+            self.vm()
 
 
 class SimpleWorkspace(object):
