@@ -44,14 +44,14 @@ class UpdateFGraph(object):
         # -- partial graph clone to use givens
         stuff = rebuild_collect_shared(
             unique_outputs,
-            inputs=[],
+            inputs=list(dests) + [],
             replace=givens,
             rebuild_strict=True,
             copy_inputs_over=True)
         _inputs, unique_outputs_w_givens, other_stuff = stuff
         clone_equiv1, _update_d, _update_expr, _shared_inputs = other_stuff
 
-        all_inputs = theano.gof.graph.inputs(unique_outputs_w_givens)
+        all_inputs = theano.gof.graph.inputs(unique_outputs_w_givens + _inputs)
 
         # -- full graph clone to protect original graph
         clone_equiv = {}
