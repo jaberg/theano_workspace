@@ -227,11 +227,16 @@ class Workspace(object):
         cu = CompiledUpdate(ufgraph, self.vals_memo)
         return self._add_compiled_update(name, cu)
 
+    def del_method(self, name):
+        delattr(self, name)
+        del self.compiled_updates[name]
+
     def _add_compiled_update(self, name, cu):
         self.compiled_updates[name] = cu
         setattr(self, name, cu)
         return cu
 
+    # XXX make these functions not methods
     def optimize(self, arg=None):
         """Convenient driver for various optimizations.
 
@@ -246,10 +251,12 @@ class Workspace(object):
         self.optimize_storage()
         self.optimize_methods(arg)
 
+    # XXX make these functions not methods
     def optimize_storage(self):
         """Revise physical layout of values to enable faster methods.
         """
 
+    # XXX make these functions not methods
     def optimize_methods(self, specifier='fast_run'):
         """Recompile methods so they run faster, if possible.
         """
