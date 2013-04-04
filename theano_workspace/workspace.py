@@ -198,6 +198,8 @@ class SimpleWorkspace(object):
         return self.vals_memo.keys()
 
     def __contains__(self, key):
+        if not isinstance(key, theano.gof.Variable):
+            raise TypeError
         return key in self.vals_memo
 
     def __getitem__(self, key):
@@ -209,6 +211,13 @@ class SimpleWorkspace(object):
             self.vals_memo[key][0] = filtered_val
         else:
             self.vals_memo[key] = [filtered_val]
+
+    def items(self):
+        return list(self.iteritems())
+
+    def iteritems(self):
+        for key in self.vals_memo:
+            yield key, self.vals_memo[key][0]
 
     def update(self, other):
         for key in other:
