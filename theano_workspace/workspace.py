@@ -130,35 +130,35 @@ class CompiledUpdate(object):
         input_storage = [vals_memo[i] if i in vals_memo else [i.data]
                 for i in ufgraph.all_inputs]
 
+        vm, input_containers, output_containers, thunks, order = linker.make_all(
+            profiler=None, # -- currently unused
+            input_storage=input_storage,
+            )
+
         self.ufgraph = ufgraph
         self.vals_memo = vals_memo
         self.input_storage = input_storage
-        self.linker = linker
+        self.vm = vm
+        self.input_containers = input_containers
+        self.output_containers = output_containers
+        self.thunks = thunks
+        self.order = order
         self.profiler = profiler  # -- sets vm, etc.
 
     def _get_profiler(self):
         return self._profiler
 
     def _set_profiler(self, profiler):
-        make_all = self.linker.make_all
-        vm, input_containers, output_containers, thunks, order = make_all(
-            profiler=profiler,
-            input_storage=self.input_storage,
-            )
-        self.vm = vm
-        self.input_containers = input_containers
-        self.output_containers = output_containers
-        self.thunks = thunks
-        self.order = order
         self._profiler = profiler
-
+        if profiler:
+            self.vm.time_thunks = profiler.flag_time_thunks
 
     profiler = property(_get_profiler, _set_profiler)
 
     def __call__(self):
         # if profiler then we need to update it (see function_module.py:641)
-        if self.profiler:
-            prof = self.profiler
+        prof = self._profiler
+        if prof:
             t0 = time.time()
             self.vm()
             t1 = time.time()
