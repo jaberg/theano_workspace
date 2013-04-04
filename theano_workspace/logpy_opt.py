@@ -36,6 +36,7 @@ from logpy.unify import(
 
 from logpy.unifymore import(
     register_unify_object_attrs,
+    register_unify_object,
     reify_object,
     unify_object,
     unify_object_attrs,
@@ -55,6 +56,7 @@ register_unify_object_attrs(tensor.TensorVariable, ['type', 'owner', 'name'])
 register_unify_object_attrs(tensor.IncSubtensor, [
     'idx_list', 'inplace', 'set_instead_of_inc',
     'destroyhandler_tolerate_aliased'])
+register_unify_object_attrs(tensor.Dot, [])
 
 
 def raw_init(cls, **kwargs):
@@ -66,6 +68,10 @@ def shape_dim(shape_of):
     def shape_dim_i(x, i):
         #print 'shape keys', shape_of.keys()
         #print 'args (x, i):', x, i
+        try:
+            return x.data.shape[i]
+        except AttributeError:
+            pass
         try:
             return int(get_scalar_constant_value(shape_of[x][i]))
         except NotScalarConstantError:
@@ -158,6 +164,34 @@ def logpy_cut_whole_incsubtensor(node):
             )
     return rval, goals
 
+
+#@register_specialize
+@register_canonicalize
+@local_optimizer()
+def logpy_remove_dot_scalar_matrix(node):
+    # TODO: how to design re-usable patterns? (dtype, ndim, etc.)
+    shape_of = node.fgraph.shape_feature.shape_of
+    shape_dimo = goalifyN(
+        shape_dim(shape_of))
+    ndimo = goalify(lambda x: getattr(x, 'ndim'))
+    x = theano.tensor.matrix() # -- XXX type should not matter
+    y = theano.tensor.matrix() # -- XXX type should not matter
+    if isinstance(node.op, theano.tensor.Dot):
+        with variables(x, y):
+            #theano.printing.debugprint(tensor.dot(x, y))
+            result = run(1, (x, y),
+                    (eq, node, tensor.dot(x, y).owner),
+                    (ndimo, x, 2),
+                    (shape_dimo, (x, 0), 1),
+                    (shape_dimo, (x, 1), 1),
+               )
+        if result:
+            xx, yy = result[0]
+            #print 'MATCHED xx!', xx, shape_of[xx], xx.type
+            #print 'MATCHED yy!', yy, shape_of[yy], yy.type
+            #theano.printing.debugprint(xx)
+            return [tensor.addbroadcast(xx, 0, 1).dimshuffle() * yy]
+
 from logpy import fact, Relation
 
 x = tensor.vector('x')
@@ -179,3 +213,4 @@ def simplify(expr):
         result = run(0, target, (reduces, source, target),
                                 (eq, expr, source))
     return result
+
