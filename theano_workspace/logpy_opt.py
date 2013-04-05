@@ -51,6 +51,8 @@ register_unify_object_attrs(tensor.TensorVariable, ['type', 'owner', 'name'])
 register_unify_object_attrs(tensor.IncSubtensor, [
     'idx_list', 'inplace', 'set_instead_of_inc',
     'destroyhandler_tolerate_aliased'])
+register_unify_object_attrs(tensor.Subtensor, ['idx_list'])
+register_unify_object_attrs(tensor.Reshape, ['ndim'])
 register_unify_object_attrs(tensor.Dot, [])
 
 
