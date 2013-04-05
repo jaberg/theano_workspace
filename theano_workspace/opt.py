@@ -14,6 +14,24 @@ from theano.tensor.basic import get_scalar_constant_value
 from theano.tensor.basic import NotScalarConstantError
 from theano import tensor
 
+def shape_dim(shape_of):
+    def shape_dim_i(x, i):
+        #print 'shape keys', shape_of.keys()
+        #print 'args (x, i):', x, i
+        try:
+            return x.data.shape[i]
+        except AttributeError:
+            pass
+        try:
+            return int(get_scalar_constant_value(shape_of[x][i]))
+        except NotScalarConstantError:
+            pass
+        try:
+            return shape_of[x][i].eval()
+        except:
+            return -1 # an unsatisfiable shape
+    return shape_dim_i
+
 
 def optimizer_from_any(specifier):
     if isinstance(specifier, basestring):

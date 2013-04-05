@@ -44,6 +44,8 @@ from logpy.unifymore import(
     more_reify_dispatch,
     )
 
+from opt import shape_dim
+
 unify_dispatch.update(more_unify_dispatch)
 
 register_unify_object_attrs(theano.Apply, ['op', 'inputs'])
@@ -60,24 +62,6 @@ def raw_init(cls, **kwargs):
     rval = object.__new__(cls)
     rval.__dict__.update(kwargs)
     return rval
-
-def shape_dim(shape_of):
-    def shape_dim_i(x, i):
-        #print 'shape keys', shape_of.keys()
-        #print 'args (x, i):', x, i
-        try:
-            return x.data.shape[i]
-        except AttributeError:
-            pass
-        try:
-            return int(get_scalar_constant_value(shape_of[x][i]))
-        except NotScalarConstantError:
-            pass
-        try:
-            return shape_of[x][i].eval()
-        except:
-            return -1 # an unsatisfiable shape
-    return shape_dim_i
 
 
 def goalifyN(func):
