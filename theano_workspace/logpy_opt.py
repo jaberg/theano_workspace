@@ -46,11 +46,6 @@ from logpy.unifymore import(
 
 unify_dispatch.update(more_unify_dispatch)
 
-# XXX  need context manager to get rid of this
-if 1: # DEBUGGING W OPS BUILT WITH RAW_INIT
-    theano.gof.Apply.__repr__ = object.__repr__
-    theano.gof.Apply.__str__ = object.__str__
-
 register_unify_object_attrs(theano.Apply, ['op', 'inputs'])
 register_unify_object_attrs(tensor.TensorVariable, ['type', 'owner', 'name'])
 register_unify_object_attrs(tensor.IncSubtensor, [
