@@ -9,8 +9,10 @@ from theano.tensor.blas import Optimizer
 IncSubtensor = theano.tensor.IncSubtensor
 Subtensor = theano.tensor.Subtensor
 Reshape = theano.tensor.Reshape
+Elemwise = theano.tensor.Elemwise
 from theano.tensor.basic import get_scalar_constant_value
 from theano.tensor.basic import NotScalarConstantError
+from theano import tensor
 
 
 def optimizer_from_any(specifier):
@@ -39,16 +41,125 @@ class RefactorSubtensors(Optimizer):
     def add_requirements(self, fgraph):
         fgraph.attach_feature(theano.gof.toolbox.ReplaceValidate())
 
+    @staticmethod
+    def op_pos(idxs):
+        ops = {}
+        for i0, n in idxs:
+            for client_apply, pos_in_client in n.outputs[0].clients:
+                if isinstance(client_apply.op, Elemwise):
+                    key = (client_apply.op, pos_in_client)
+                    key += (tuple(i.type for i in client_apply.inputs),)
+                    ops.setdefault(key, []).append(client_apply)
+        for key, ins in ops.items():
+            if len(ins) == len(idxs):
+                return key, ins
+
+
+    def foo(self, x, subtensor_clients):
+        # -- potentially merge the subtensor clients of x
+
+        if len(subtensor_clients) <= 1:
+            # -- leave this for another optimization
+            return
+
+        if any(len(st.inputs) > 1 for st in subtensor_clients):
+            # -- TODO: support non-constant indexing ranges
+            return
+
+        if all(((len(n.op.idx_list) == 1)
+                and isinstance(n.op.idx_list[0], int)
+                )
+                for n in subtensor_clients):
+            idxs = [(n.op.idx_list[0], n)
+                for n in subtensor_clients]
+            idxs.sort()
+            assert len(idxs) > 1
+            # TODO: support incomplete intervals
+            if range(len(idxs)) == list(zip(*idxs)[0]):
+                op_pos_rval = self.op_pos(idxs)
+                if not op_pos_rval:
+                    return
+                # each xclient[i] is something like
+                # op(a, b, x[i], c)
+                # 
+                (op, xpos, itypes), xclients = op_pos_rval
+                new_inputs = []
+                for ipos, itype in enumerate(itypes):
+                    if ipos == xpos:
+                        iin = x[:len(idxs)]
+                    else:
+                        iin = tensor.concatenate([
+                            tensor.shape_padleft(xcl.inputs[ipos])
+                            for xcl in xclients])
+                    assert iin.broadcastable[1:] == itype.broadcastable, (
+                        ipos, itype)
+                    new_inputs.append(iin)
+                new_output0 = op(*new_inputs)
+
+                replacements = [(xcl.outputs[0], new_output0[i])
+                    for i, xcl in enumerate(xclients)]
+                #print 'REPLACEMENTS', replacements
+                #print 'RTYPES', [(a.type, b.type) for a, b in replacements]
+                #print 'INPUTS', [a.type for a in new_inputs]
+
+                self.fgraph.replace_all_validate(replacements,
+                    reason='RefactorSubtensors')
+                self.nb_replacement += len(replacements)
+                return True
+
+                new_clients = []
+                print op_pos
+                #op, pos = op_pos
+                theano.printing.debugprint(op_pos[1][0].outputs)
+                theano.printing.debugprint(op_pos[1][1].outputs)
+
+            if 0:
+                print 'op inpos', 
+                replacements = []
+                to_go = set()
+                # -- check for common operations on these slices.
+                # TODO: check for *some* matches
+                for start, stop, subt_node in ranges:
+                    for client_apply, pos_in_client in subt_node.outputs[0].clients:
+                        if len(client_apply.outputs) > 1:
+                            raise NotImplementedError()
+                        client_op = client_apply.op
+                        if isinstance(client_op, theano.tensor.Elemwise):
+                            new_inputs = list(client_apply.inputs)
+
+                            # XXX: need to simultaneously replace
+                            # all new_inputs that our subtensor
+                            # merge is going to affect. If we are
+                            # merging e.g.
+                            #   add(x[1:2], y[1:2])
+                            #   add(x[2:4], y[2:4])
+                            #   -> add(x[1:4], y[1:4])[0:1]
+                            #      add(x[1:4], y[1:4])[1:3]
+                            # then we need to replace both of
+                            # x and y.
+
+                            new_inputs[pos_in_client] = x
+                            new_out = client_op(*new_inputs)[start:stop]
+                            replacements.append((client_apply.outputs[0], new_out))
+                            assert client_apply.outputs[0] not in to_go
+                            to_go.add(client_apply.outputs[0])
+                if replacements:
+                    self.fgraph.replace_all_validate(replacements,
+                        reason='RefactorSubtensors')
+                    self.nb_replacement += len(replacements)
+                    return True
+
     def apply(self, fgraph):
-        nb_iter = 0
-        nb_replacement = 0
-        nb_replacement_didn_t_remove = 0
-        nb_inconsistency_make = 0
-        nb_inconsistency_replace = 0
-        time_canonicalize = 0
-        time_factor_can = 0
-        time_factor_list = 0
-        time_toposort = 0
+        self.fgraph = fgraph
+        self.nb_iter = 0
+        self.nb_replacement = 0
+        self.nb_replacement_didn_t_remove = 0
+        self.nb_inconsistency_make = 0
+        self.nb_inconsistency_replace = 0
+        self.time_canonicalize = 0
+        self.time_factor_can = 0
+        self.time_factor_list = 0
+        self.time_toposort = 0
 
         did_something = True
         #print '-- START -- '
@@ -60,93 +171,38 @@ class RefactorSubtensors(Optimizer):
         # idea!
 
         while did_something:
-            did_something = False
-            nb_iter += 1
+            self.nb_iter += 1
 
             subtensors = [n for n in fgraph.toposort()
                     if isinstance(n.op, Subtensor)]
 
+            # x -> x[a], x[b], ...
             xs_with_subtensor = {}
             for n in subtensors:
                 xs_with_subtensor.setdefault(n.inputs[0], []).append(n)
 
-            for x, subtensor_clients in xs_with_subtensor.items():
-                if did_something:
-                    break
-                if len(subtensor_clients) > 1:
-                    # -- potentially merge the subtensor clients of x
-                    if any(len(n.inputs) > 1 for n in subtensor_clients):
-                        # -- TODO: support non-constant indexing ranges
-                        continue
-
-                    if all(((len(n.op.idx_list) == 1)
-                            and isinstance(n.op.idx_list[0], slice)
-                            and isinstance(n.op.idx_list[0].start, int)
-                            and isinstance(n.op.idx_list[0].stop, int)
-                            and n.op.idx_list[0].step == None
-                            )
-                            for n in subtensor_clients):
-                        ranges = [
-                            (n.op.idx_list[0].start, n.op.idx_list[0].stop, n)
-                            for n in subtensor_clients]
-                        ranges.sort()
-                        assert len(ranges) > 1
-                        if ranges[0][0] != 0:
-                            raise NotImplementedError()
-                            # XXX: remember to revise indexing below to be
-                            # relative to new vector, so that it will work
-                            # when ranges[0].start != 0
-
-                        # -- check if the selection range boundaries match up
-                        # TODO: consider merging *some* of the subtensor clients
-                        if all(r0[1] == r1[0]
-                                for r0, r1 in zip(ranges[:-1], ranges[1:])):
-                            #print 'potentially merge', x, ranges
-                            replacements = []
-                            to_go = set()
-                            # -- check for common operations on these slices.
-                            # TODO: check for *some* matches
-                            for start, stop, subt_node in ranges:
-                                for client_apply, pos_in_client in subt_node.outputs[0].clients:
-                                    if len(client_apply.outputs) > 1:
-                                        raise NotImplementedError()
-                                    client_op = client_apply.op
-                                    if isinstance(client_op, theano.tensor.Elemwise):
-                                        new_inputs = list(client_apply.inputs)
-                                        # XXX: need to simultaneously replace
-                                        # all new_inputs that our subtensor
-                                        # merge is going to affect. If we are
-                                        # merging e.g.
-                                        #   add(x[1:2], y[1:2])
-                                        #   add(x[2:4], y[2:4])
-                                        #   -> add(x[1:4], y[1:4])[0:1]
-                                        #      add(x[1:4], y[1:4])[1:3]
-                                        # then we need to replace both of
-                                        # x and y.
-
-                                        new_inputs[pos_in_client] = x
-                                        new_out = client_op(*new_inputs)[start:stop]
-                                        replacements.append((client_apply.outputs[0], new_out))
-                                        assert client_apply.outputs[0] not in to_go
-                                        to_go.add(client_apply.outputs[0])
-                            if replacements:
-                                fgraph.replace_all_validate(replacements,
-                                    reason='RefactorSubtensors')
-                                nb_replacement += len(replacements)
-                                did_something = True
-                        else:
-                            #print 'clients did not match up'
-                            pass
-                    else:
-                        # -- TODO: match up other kinds of indexing
-                        continue
+            did_something = any(self.foo(x, subtensor_clients)
+                    for x, subtensor_clients in xs_with_subtensor.items())
 
         #theano.printing.debugprint(fgraph.outputs)
         #print '-- DONE -- '
-        return (self, nb_iter, nb_replacement, nb_replacement_didn_t_remove,
-                nb_inconsistency_make, nb_inconsistency_replace,
-                time_canonicalize, time_factor_can,
-                time_factor_list, time_toposort)
+        return (self,
+                self.nb_iter,
+                self.nb_replacement,
+                self.nb_replacement_didn_t_remove,
+                self.nb_inconsistency_make, 
+                self.nb_inconsistency_replace,
+                self.time_canonicalize, 
+                self.time_factor_can,
+                self.time_factor_list, 
+                self.time_toposort)
+
+    def logic(self):
+        # todo make this work with logpy
+        pattern = op(x[a:b], u), op(x[b:c], v), op(x[c:d], w)
+        result = op(x, concatenate(u, v, w))
+        
+
 
 
 theano.compile.mode.optdb.register('refactor_subtensors',

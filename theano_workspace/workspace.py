@@ -295,7 +295,7 @@ class ViewWorkspace(SimpleWorkspace):
             if v not in ceq or not ceq[v]:
                 continue
             clops = tuple((n.op, p) for n, p in ceq[v].clients)
-            key = v.type, shp(v)[1:], clops
+            key = v.type, shp(v), clops
             v_by_use.setdefault(key, []).append(v.name)
 
         for lst in v_by_use.values():
@@ -311,21 +311,17 @@ class ViewWorkspace(SimpleWorkspace):
             print key
             print ' ', vbn
             nda = np.concatenate(
-                    [ws.vals_memo[v_by_name[name]][0] for name in vbn])
+                [ws.vals_memo[v_by_name[name]][0][None,:] for name in vbn])
             nda = np.asarray(nda, key[0].dtype)
             nda_vtype = theano.tensor.TensorType(
                 dtype=key[0].dtype,
-                broadcastable=(False,) + key[0].broadcastable[1:])
-            nda_var =  nda_vtype(name='holder')
+                broadcastable=tuple(si == 1 for si in nda.shape))
+            nda_var =  nda_vtype(name='holder{%s, %s}' % (
+                nda.dtype, nda.shape))
             self.vals_memo[nda_var] = [nda]
-            offset = 0
-            for name in vbn:
+            for i, name in enumerate(vbn):
                 v = v_by_name[name]
-                self.views_memo[v] = (
-                        nda_var,
-                        offset,
-                        len(ws.vals_memo[v][0]))
-                offset += len(ws.vals_memo[v][0])
+                self.views_memo[v] = (nda_var, i)
                 del self.vals_memo[v]
 
         #print self.views_memo
@@ -338,8 +334,8 @@ class ViewWorkspace(SimpleWorkspace):
 
     def __getitem__(self, key):
         if key in self.views_memo:
-            var, offset, n = self.views_memo[key]
-            return self[var][offset: offset + n]
+            var, idx = self.views_memo[key]
+            return self[var][idx]
         else:
             return self.vals_memo[key][0]
 
@@ -347,8 +343,8 @@ class ViewWorkspace(SimpleWorkspace):
         filtered_val = key.type.filter(val, strict=False, allow_downcast=True)
 
         if key in self.views_memo:
-            var, offset, n = self.views_memo[key]
-            self.vals_memo[var][0][offset: offset + n] = filtered_val
+            var, idx = self.views_memo[key]
+            self.vals_memo[var][0][idx] = filtered_val
         else:
             if key in self.vals_memo:
                 self.vals_memo[key][0] = filtered_val
@@ -365,13 +361,13 @@ class ViewWorkspace(SimpleWorkspace):
         noview_updates = dict() #XXX want ordered-dict here
         for dst, out in updates:
             if dst in self.views_memo:
-                var, offset, n_elems = self.views_memo[dst]
+                var, idx = self.views_memo[dst]
                 # -- build the shape into the graph
                 #shp = self.vals_memo[var][0].shape
                 # print 'shp', shp
                 upvar = noview_updates.get(var, var)
                 upvar = theano.tensor.set_subtensor(
-                        upvar[offset: offset + n_elems],
+                        upvar[idx],
                         out)
                 noview_updates[var] = upvar
                 assert var.owner is None
@@ -382,12 +378,10 @@ class ViewWorkspace(SimpleWorkspace):
 
         givens = []
         for var in self.views_memo:
-            svar, offset, n_elems = self.views_memo[var]
+            svar, idx = self.views_memo[var]
             shp = self.vals_memo[svar][0].shape
-            svar = Hint(shape=shp)(svar)
-            vvar = svar[offset: offset + n_elems]
             uvar = theano.tensor.patternbroadcast(
-                vvar,
+                Hint(shape=shp)(svar)[idx],
                 var.broadcastable)
             assert var.type == uvar.type, (var.type, uvar.type)
             givens.append((var, uvar))
