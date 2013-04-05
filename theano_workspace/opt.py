@@ -1,3 +1,4 @@
+from collections import OrderedDict
 import numpy as np
 import theano
 
@@ -49,29 +50,57 @@ def optimizer_from_any(specifier):
 
 class RefactorSubtensors(Optimizer):
     """
-    op(x[a:b]), op(x[b:c]) -> A = op(x[a:c]), A[0:b-a], A[b-a:c-a]
+    May ops can process entire tensors at once if it has already been
+    specified that they should process each slice of a tensor.
 
-    When some elementwise operation is applied separately to neighbouring
-    parts of a tensor, this optimization rearranges things so that the
-    elementwise operation is only applied once, and the result is split.
+    op(x[:a]), op([a:b]), op(x[b:]) -> A = op(x), A[:a], A[a:b] A[b:]
+
+    Graphs of the latter form are easier to implement fast because op(x) can
+    be parallel internally.
+
     """
+    mergers = []
+
+    @classmethod
+    def add_merger(cls, f):
+        cls.mergers.append(f)
+        return f
 
     def add_requirements(self, fgraph):
         fgraph.attach_feature(theano.gof.toolbox.ReplaceValidate())
 
     @staticmethod
-    def op_pos(idxs):
-        ops = {}
-        for i0, n in idxs:
-            for client_apply, pos_in_client in n.outputs[0].clients:
-                if isinstance(client_apply.op, Elemwise):
-                    key = (client_apply.op, pos_in_client)
-                    key += (tuple(i.type for i in client_apply.inputs),)
-                    ops.setdefault(key, []).append(client_apply)
-        for key, ins in ops.items():
-            if len(ins) == len(idxs):
-                return key, ins
+    def downstream_op_iter(idxs):
+        """Key routine in recognizing refactor opportunities.
 
+        idxs: a list of (int i, node n) pairs such that each node is some
+            x[i].owner, for one base variable x.
+
+        Returns: ((op, pos, itypes), nodes)
+            Each nodes[i] is an op(..., x[i], ...) where the relevant slice of
+            x shows up in position `pos` in the inputs to every node.
+        """
+        ops = OrderedDict()
+        if range(len(idxs)) == list(zip(*idxs)[0]):
+            for i0, n in idxs:
+                for client_apply, pos_in_client in n.outputs[0].clients:
+                    key = (client_apply.op, pos_in_client)
+                    otypes = (tuple(i.type for i in client_apply.outputs),)
+                    assert len(set(otypes)) == 1
+                    key += (otypes[0],)
+                    key += (tuple(tuple(i.broadcastable)
+                                  for i in client_apply.inputs),)
+                    ops.setdefault(key, []).append(client_apply)
+            for key, ins in ops.items():
+                #print key
+                #print len(ins)
+                #print len(idxs)
+                #print ins
+                if len(ins) == len(idxs):
+                    yield (key, ins)
+        else:
+            # TODO work with this case
+            pass
 
     def foo(self, x, subtensor_clients):
         # -- potentially merge the subtensor clients of x
@@ -84,6 +113,7 @@ class RefactorSubtensors(Optimizer):
             # -- TODO: support non-constant indexing ranges
             return
 
+        # if we're dealing with x[i] subtensors
         if all(((len(n.op.idx_list) == 1)
                 and isinstance(n.op.idx_list[0], int)
                 )
@@ -92,44 +122,24 @@ class RefactorSubtensors(Optimizer):
                 for n in subtensor_clients]
             idxs.sort()
             assert len(idxs) > 1
-            # TODO: support incomplete intervals
-            if range(len(idxs)) == list(zip(*idxs)[0]):
-                op_pos_rval = self.op_pos(idxs)
-                if not op_pos_rval:
-                    return
-                # each xclient[i] is something like
-                # op(a, b, x[i], c)
-                # 
-                (op, xpos, itypes), xclients = op_pos_rval
-                new_inputs = []
-                for ipos, itype in enumerate(itypes):
-                    if ipos == xpos:
-                        iin = x[:len(idxs)]
-                    else:
-                        iin = tensor.concatenate([
-                            tensor.shape_padleft(xcl.inputs[ipos])
-                            for xcl in xclients])
-                    assert iin.broadcastable[1:] == itype.broadcastable, (
-                        ipos, itype)
-                    new_inputs.append(iin)
-                new_output0 = op(*new_inputs)
-
-                replacements = [(xcl.outputs[0], new_output0[i])
-                    for i, xcl in enumerate(xclients)]
-                #print 'REPLACEMENTS', replacements
-                #print 'RTYPES', [(a.type, b.type) for a, b in replacements]
-                #print 'INPUTS', [a.type for a in new_inputs]
-
-                self.fgraph.replace_all_validate(replacements,
-                    reason='RefactorSubtensors')
-                self.nb_replacement += len(replacements)
-                return True
-
-                new_clients = []
-                print op_pos
-                #op, pos = op_pos
-                theano.printing.debugprint(op_pos[1][0].outputs)
-                theano.printing.debugprint(op_pos[1][1].outputs)
+            shpf = shape_dim(self.fgraph.shape_feature.shape_of)
+            if len(idxs) != shpf(x, 0):
+                return
+            def opr_fn():
+                for op_pos_rval in self.downstream_op_iter(idxs):
+                    #print op_pos_rval
+                    for fn in self.mergers:
+                        yield op_pos_rval, fn
+                    print 'failed to merge', op_pos_rval[0]
+            for opr, fn in opr_fn():
+                #print 'thus, opr', opr, fn
+                replacements = fn(x, opr)
+                if replacements:
+                    print 'REPLACEMENTS', replacements
+                    self.fgraph.replace_all_validate(replacements,
+                        reason='RefactorSubtensors')
+                    self.nb_replacement += len(replacements)
+                    return True
 
 
     def apply(self, fgraph):
@@ -185,7 +195,36 @@ class RefactorSubtensors(Optimizer):
         pattern = op(x[a:b], u), op(x[b:c], v), op(x[c:d], w)
         result = op(x, concatenate(u, v, w))
         
+rst = RefactorSubtensors()
 theano.compile.mode.optdb.register('refactor_subtensors',
-        RefactorSubtensors(),
+        rst,
         0, 'fast_compile', 'fast_run')
+
+@rst.add_merger
+def refactor_subtensor_elemwise(x, op_pos_rval):
+    (op, xpos, otype, itypes), xclients = op_pos_rval
+    print 'merge?', op
+    if not isinstance(op, Elemwise):
+        return
+    # each xclient[i] is something like
+    # op(a, b, x[i], c)
+    # 
+    new_inputs = []
+    for ipos, ibc in enumerate(itypes):
+        if ipos == xpos:
+            iin = x
+        else:
+            iin = tensor.concatenate([
+                tensor.shape_padleft(xcl.inputs[ipos])
+                for xcl in xclients])
+        assert iin.broadcastable[1:] == ibc
+        new_inputs.append(iin)
+    new_output0 = op(*new_inputs)
+
+    replacements = [(xcl.outputs[0], new_output0[i])
+        for i, xcl in enumerate(xclients)]
+    #print 'RTYPES', [(a.type, b.type) for a, b in replacements]
+    #print 'INPUTS', [a.type for a in new_inputs]
+    return replacements
+
 
