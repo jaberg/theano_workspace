@@ -1,6 +1,7 @@
 import copy
 import sys
 import time
+from collections import OrderedDict
 
 import numpy as np
 
@@ -43,7 +44,7 @@ class UpdateFGraph(object):
         all_inputs = theano.gof.graph.inputs(unique_outputs_w_givens + _inputs)
 
         # -- full graph clone to protect original graph
-        clone_equiv = {}
+        clone_equiv = {} # -- do not need order here
         theano.gof.graph.clone_get_equiv(
             [],
             unique_outputs_w_givens + _inputs,
@@ -86,11 +87,11 @@ class UpdateFGraph(object):
 
         # -- pre-install the shape information from the Hints created by
         #    e.g. SharedStorageWorkspace
-        done = {}
+        done = {} # -- no order ok
         for node in fgraph.toposort():
             if is_hint_node(node):
                 if node.inputs[0] in done: continue
-                hints = dict(node.op.hints)
+                hints = OrderedDict(node.op.hints)
                 if 'shape' in hints:
                     x = node.inputs[0]
                     assert x.ndim == len(hints['shape'])
@@ -126,7 +127,7 @@ class CompiledUpdate(object):
         linker = VM_Linker(**VM_Linker_kwargs)
         no_recycling = infer_reuse_pattern(ufgraph.fgraph, ufgraph.fgraph.outputs)
         linker.accept(ufgraph.fgraph, no_recycling=no_recycling)
-        linker.accept_var_updates(dict(zip(
+        linker.accept_var_updates(OrderedDict(zip(
             ufgraph.cloned_dests,
             ufgraph.cloned_outputs)))
 
@@ -194,8 +195,8 @@ class SimpleWorkspace(object):
     """
 
     def __init__(self):
-        self.vals_memo = {}
-        self.compiled_updates = {}
+        self.vals_memo = OrderedDict()
+        self.compiled_updates = OrderedDict()
 
     def __len__(self):
         return len(self.vals_memo)
@@ -278,9 +279,9 @@ class ViewWorkspace(SimpleWorkspace):
         for v, vcell in ws.vals_memo.items():
             self.vals_memo[v] = copy.deepcopy(vcell)
 
-        self.views_memo = {}
+        self.views_memo = OrderedDict()
 
-        v_by_name = dict((v.name, v) for v in ws)
+        v_by_name = OrderedDict((v.name, v) for v in ws)
         if len(v_by_name) != len(ws):
             tmp = list([v.name for v in ws])
             for name in v_by_name:
@@ -290,7 +291,7 @@ class ViewWorkspace(SimpleWorkspace):
 
         cu = ws.compiled_updates.values()[0] # XXX not deterministic
         ceq = cu.ufgraph.clone_equiv
-        v_by_use = {}
+        v_by_use = OrderedDict()
         for v in ws:  # XXX not deterministic
             if v not in ceq or not ceq[v]:
                 continue
@@ -308,8 +309,8 @@ class ViewWorkspace(SimpleWorkspace):
         for key, vbn in v_by_use.items():
             if len(vbn) <= 1:
                 continue
-            print key
-            print ' ', vbn
+            # print key
+            # print ' ', vbn
             nda = np.concatenate(
                 [ws.vals_memo[v_by_name[name]][0][None,:] for name in vbn])
             nda = np.asarray(nda, key[0].dtype)
@@ -358,7 +359,7 @@ class ViewWorkspace(SimpleWorkspace):
         givens=None,
         optimizer=None,
         ):
-        noview_updates = dict() #XXX want ordered-dict here
+        noview_updates = OrderedDict()
         for dst, out in updates:
             if dst in self.views_memo:
                 var, idx = self.views_memo[dst]
@@ -386,7 +387,6 @@ class ViewWorkspace(SimpleWorkspace):
             assert var.type == uvar.type, (var.type, uvar.type)
             givens.append((var, uvar))
 
-        print noview_updates.keys()
         ufgraph = UpdateFGraph(noview_updates.items(), givens=givens)
         cu = CompiledUpdate(ufgraph, self.vals_memo)
 
