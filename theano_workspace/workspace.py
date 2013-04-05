@@ -197,8 +197,11 @@ class SimpleWorkspace(object):
         self.vals_memo = {}
         self.compiled_updates = {}
 
+    def __len__(self):
+        return len(self.vals_memo)
+
     def __iter__(self):
-        return self.vals_memo.keys()
+        return iter(self.vals_memo)
 
     def __contains__(self, key):
         if not isinstance(key, theano.gof.Variable):
