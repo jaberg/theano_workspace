@@ -133,6 +133,25 @@ def logpy_cut_whole_setsubtensor(node):
             )
     return rval, goals
 
+@register_specialize
+@register_canonicalize
+@local_optimizer()
+@logpy_optimization
+def logpy_cut_subtensor(node):
+    # TODO: how to design re-usable patterns? (dtype, ndim, etc.)
+    shape_dimo = goalifyN(
+        shape_dim(node.fgraph.shape_feature.shape_of))
+    #jj = lpint(238908925034, 'j') # -- a number that cannot occur in the graph
+    x = tensor.vector()
+    jj = 12345
+    with variables(x, jj) :
+        rval = [x]
+        goals = (
+            (eq, node.outputs[0], x[:jj]),
+            (shape_dimo, (x, 0), jj),
+            )
+    return rval, goals
+
 
 #@register_specialize
 @register_canonicalize
