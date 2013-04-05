@@ -43,6 +43,8 @@ def optimizer_from_any(specifier):
             raise ValueError('Optimizer %s not in %s' % (
                 specifier, dct))
         return theano.compile.mode.optdb.query(query)
+    elif isinstance(specifier, theano.gof.Query):
+        return theano.compile.mode.optdb.query(specifier)
     else:
         # TODO probably not implemented error is more appropriate
         raise TypeError(specifier)

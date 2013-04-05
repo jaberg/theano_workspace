@@ -38,16 +38,16 @@ class UpdateFGraph(object):
             replace=givens,
             rebuild_strict=True,
             copy_inputs_over=True)
-        _inputs, unique_outputs_w_givens, other_stuff = stuff
+        _inputs, unique_outputs_w_giv, other_stuff = stuff
         clone_equiv1, _update_d, _update_expr, _shared_inputs = other_stuff
 
-        all_inputs = theano.gof.graph.inputs(unique_outputs_w_givens + _inputs)
+        all_inputs = theano.gof.graph.inputs(unique_outputs_w_giv + _inputs)
 
         # -- full graph clone to protect original graph
         clone_equiv = {} # -- do not need order here
         theano.gof.graph.clone_get_equiv(
             [],
-            unique_outputs_w_givens + _inputs,
+            unique_outputs_w_giv + _inputs,
             copy_inputs_and_orphans=True,
             memo=clone_equiv)
         # -- redirect through the second clone
@@ -57,7 +57,7 @@ class UpdateFGraph(object):
                 clone_equiv[orig_var] = clone_equiv[tmp]
         self.cloned_inputs = [clone_equiv[var] for var in all_inputs]
         self.cloned_dests = [clone_equiv[var] for var in dests]
-        self.cloned_outputs = [clone_equiv[var] for var in unique_outputs_w_givens]
+        self.cloned_outputs = [clone_equiv[var] for var in unique_outputs_w_giv]
         fgraph = theano.gof.fg.FunctionGraph(
             self.cloned_inputs,
             self.cloned_outputs)
@@ -66,7 +66,8 @@ class UpdateFGraph(object):
         for node in fgraph.apply_nodes:
             if getattr(node.op, 'destroy_map', None):
                 if not accept_inplace:
-                    raise TypeError("Graph must not contain inplace operations", node, node.op)
+                    raise TypeError("Graph must not contain inplace operations",
+                                    node, node.op)
                 else:
                     fgraph.attach_feature(theano.gof.DestroyHandler())
                     break
