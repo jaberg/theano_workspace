@@ -45,12 +45,15 @@ class UpdateFGraph(object):
         # -- full graph clone to protect original graph
         clone_equiv = {}
         theano.gof.graph.clone_get_equiv(
-            all_inputs,
-            unique_outputs_w_givens,
+            [],
+            unique_outputs_w_givens + _inputs,
             copy_inputs_and_orphans=True,
             memo=clone_equiv)
+        # -- redirect through the second clone
         for orig_var in clone_equiv1:
-            clone_equiv[orig_var] = clone_equiv[clone_equiv1[orig_var]]
+            tmp = clone_equiv1[orig_var]
+            if tmp in clone_equiv:
+                clone_equiv[orig_var] = clone_equiv[tmp]
         self.cloned_inputs = [clone_equiv[var] for var in all_inputs]
         self.cloned_dests = [clone_equiv[var] for var in dests]
         self.cloned_outputs = [clone_equiv[var] for var in unique_outputs_w_givens]
