@@ -129,11 +129,11 @@ class RefactorSubtensors(Optimizer):
                                         replacements.append((client_apply.outputs[0], new_out))
                                         assert client_apply.outputs[0] not in to_go
                                         to_go.add(client_apply.outputs[0])
-                            #print 'Replacements', replacements
-                            fgraph.replace_all_validate(replacements,
-                                reason='RefactorSubtensors')
-                            nb_replacement += len(replacements)
-                            did_something = True
+                            if replacements:
+                                fgraph.replace_all_validate(replacements,
+                                    reason='RefactorSubtensors')
+                                nb_replacement += len(replacements)
+                                did_something = True
                         else:
                             #print 'clients did not match up'
                             pass
