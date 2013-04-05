@@ -272,31 +272,63 @@ class SimpleWorkspace(object):
 class ViewWorkspace(SimpleWorkspace):
     def __init__(self, ws):
         SimpleWorkspace.__init__(self)
+        def shp(v):
+            return ws.vals_memo[v][0].shape
+
+        for v, vcell in ws.vals_memo.items():
+            self.vals_memo[v] = copy.deepcopy(vcell)
 
         self.views_memo = {}
 
-        # set up some views
-        self.s_fvector = theano.tensor.vector('fvector')
-        vectors = [var for var in ws.vals_memo
-                if var.type == self.s_fvector.type]
-        if vectors:
-            fvector = np.concatenate(
-                    [ws.vals_memo[var][0] for var in vectors]).astype('float32')
+        v_by_name = dict((v.name, v) for v in ws)
+        if len(v_by_name) != len(ws):
+            tmp = list([v.name for v in ws])
+            for name in v_by_name:
+                tmp.remove(name)
+            print tmp
+            raise NotImplementedError('view logic uses names')
+
+        cu = ws.compiled_updates.values()[0] # XXX not deterministic
+        ceq = cu.ufgraph.clone_equiv
+        v_by_use = {}
+        for v in ws:  # XXX not deterministic
+            if v not in ceq or not ceq[v]:
+                continue
+            clops = tuple((n.op, p) for n, p in ceq[v].clients)
+            key = v.type, shp(v)[1:], clops
+            v_by_use.setdefault(key, []).append(v.name)
+
+        for lst in v_by_use.values():
+            # extremely hacky way to line up corresponding
+            # variables ... make sure that all vars in a motif
+            # have a common and distinguishing beginning-of-name
+            lst.sort()
+
+        # XXX not deterministic
+        for key, vbn in v_by_use.items():
+            if len(vbn) <= 1:
+                continue
+            print key
+            print ' ', vbn
+            nda = np.concatenate(
+                    [ws.vals_memo[v_by_name[name]][0] for name in vbn])
+            nda = np.asarray(nda, key[0].dtype)
+            nda_vtype = theano.tensor.TensorType(
+                dtype=key[0].dtype,
+                broadcastable=(False,) + key[0].broadcastable[1:])
+            nda_var =  nda_vtype(name='holder')
+            self.vals_memo[nda_var] = [nda]
             offset = 0
-            for var in vectors:
-                self.views_memo[var] = (
-                        self.s_fvector,
+            for name in vbn:
+                v = v_by_name[name]
+                self.views_memo[v] = (
+                        nda_var,
                         offset,
-                        len(ws.vals_memo[var][0]))
-                offset += len(ws.vals_memo[var][0])
-            self.vals_memo[self.s_fvector] = [fvector]
+                        len(ws.vals_memo[v][0]))
+                offset += len(ws.vals_memo[v][0])
+                del self.vals_memo[v]
 
         #print self.views_memo
-
-        # set up some normal values
-        for var in ws.vals_memo:
-            if var not in self.views_memo:
-                self.vals_memo[var] = copy.deepcopy(ws.vals_memo[var])
 
         for fname, f in ws.compiled_updates.items():
             self.add_method(fname, updates=f.ufgraph.updated_vars)
@@ -342,6 +374,7 @@ class ViewWorkspace(SimpleWorkspace):
                         upvar[offset: offset + n_elems],
                         out)
                 noview_updates[var] = upvar
+                assert var.owner is None
             else:
                 if dst in noview_updates:
                     raise ValueError('duplicate destination', updated_vals)
@@ -352,8 +385,14 @@ class ViewWorkspace(SimpleWorkspace):
             svar, offset, n_elems = self.views_memo[var]
             shp = self.vals_memo[svar][0].shape
             svar = Hint(shape=shp)(svar)
-            givens.append((var, svar[offset: offset + n_elems]))
+            vvar = svar[offset: offset + n_elems]
+            uvar = theano.tensor.patternbroadcast(
+                vvar,
+                var.broadcastable)
+            assert var.type == uvar.type, (var.type, uvar.type)
+            givens.append((var, uvar))
 
+        print noview_updates.keys()
         ufgraph = UpdateFGraph(noview_updates.items(), givens=givens)
         cu = CompiledUpdate(ufgraph, self.vals_memo)
 
