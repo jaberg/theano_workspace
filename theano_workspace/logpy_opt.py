@@ -74,7 +74,8 @@ def shape_dim(shape_of):
     return shape_dim_i
 
 
-class LogpyTensorVar(Var, tensor.TensorVariable):
+if 0:
+  class LogpyTensorVar(Var, tensor.TensorVariable):
 
     def _logpy_reify_dispatch(self, s):
         return s[self]
@@ -91,8 +92,8 @@ class LogpyTensorVar(Var, tensor.TensorVariable):
         d[self] = other
         return d
 
-
-class LogpyNumpyInteger(int, Var):
+if 0:
+  class LogpyNumpyInteger(int, Var):
     # -- int has to go first, before Var so that __new__ doesn't complain,
     # but then these methods from Var have to be duplicated here...
     # maybe logpy Var could be built from one class that implements __new__
@@ -148,12 +149,15 @@ def logpy_cut_whole_incsubtensor(node):
     # TODO: how to design re-usable patterns? (dtype, ndim, etc.)
     shape_dimo = goalifyN(
         shape_dim(node.fgraph.shape_feature.shape_of))
-    jj = lpint(238908925034, 'j') # -- a number that cannot occur in the graph
-    x = lptensor('x', 'float32', [False])
-    y = lptensor('y', 'float32', [False])
-    x0 = var('x0')
-    rval = [y]
-    goals = (
+    #jj = lpint(238908925034, 'j') # -- a number that cannot occur in the graph
+    #x = lptensor('x', 'float32', [False])
+    #y = lptensor('y', 'float32', [False])
+    x = tensor.vector()
+    y = tensor.vector()
+    jj = 12345
+    with variables(x, y, jj) :
+        rval = [y]
+        goals = (
             (eq, node.outputs[0], tensor.set_subtensor(x[0:jj], y)),
             (shape_dimo, (x, 0), jj),
             )

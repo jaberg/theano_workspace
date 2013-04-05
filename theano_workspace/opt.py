@@ -62,7 +62,6 @@ class RefactorSubtensors(Optimizer):
         while did_something:
             did_something = False
             nb_iter += 1
-            #print 'NEW LOOP'
 
             subtensors = [n for n in fgraph.toposort()
                     if isinstance(n.op, Subtensor)]
@@ -231,7 +230,6 @@ class Match(object):
             else:
                 raise NotImplementedError(arg)
         return assignment
-
 
 class MatchConstant(object):
     def __init__(self, name, val=None):
