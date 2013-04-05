@@ -180,25 +180,146 @@ def logpy_remove_dot_scalar_matrix(node):
             #theano.printing.debugprint(xx)
             return [tensor.addbroadcast(xx, 0, 1).dimshuffle() * yy]
 
-from logpy import fact, Relation
+#@register_canonicalize
+@local_optimizer()
+def logpy_group_incsubtensor(node):
+    # TODO: how to design re-usable patterns? (dtype, ndim, etc.)
 
-x = tensor.vector('x')
-from theano.tensor import exp, log
-rules = [
-        (x + x, 2*x),
-        (x * x, x**2),
-        (exp(log(x)), x),
-        (log(exp(x)), x),
-        ]
-vars = [x]
-reduces = Relation('reduces')
-for source, target in rules:
-    fact(reduces, source, target)
+    shape_of = node.fgraph.shape_feature.shape_of
+    shape_dimo = goalifyN(
+        shape_dim(shape_of))
+    ndimo = goalify(lambda x: getattr(x, 'ndim'))
+    x = node.outputs[0].type()
+    if x.ndim == 0:
+        return
+    y = x[0].type()
+    z = tensor.set_subtensor(x[1001], y)
+    incs = []
+    orig_out = node.outputs[0]
+    while node:
+        with variables(x, y, 1001):
+            match = run(1, (x, y, 1001), (eq, node.outputs[0], z))
+            if match:
+                xx, yy, ii = match[0]
+                incs.append((ii, xx, yy))
+                node = xx.owner
+                continue
+        break
+    if not incs:
+        return
+    incs.sort()
+    if zip(*incs)[0] == tuple(range(shape_dim(shape_of)(xx, 0))):
+        iin = tensor.concatenate([
+            tensor.shape_padleft(yy)
+            for ii, _, yy in incs])
+        print 'INCS', incs
+        return [iin]
 
-def simplify(expr):
-    source, target = var(), var()
-    with variables(*vars):
-        result = run(0, target, (reduces, source, target),
-                                (eq, expr, source))
-    return result
+#@register_canonicalize
+@local_optimizer()
+def logpy_lift_dimshuffle_throughsubtensor(node):
+    if isinstance(node.op, tensor.DimShuffle):
+        x, = node.inputs
+        if x.owner and isinstance(x.owner.op, tensor.Subtensor):
+            v = x.owner.inputs[0]
+            if len(x.owner.inputs) > 1:
+                # TODO
+                return
+            # v[vidx].dimshuffle(*xpat)
+            # -> v.dimshuffle(*xpat2)[vidx2]
+            xpat = node.op.new_order
+            vidx = x.owner.op.idx_list
+            if not len(vidx) == 1 or not isinstance(vidx[0], int):
+                # TODO
+                #print 'xtype', x.type
+                #print 'x', x
+                #print 'x', vidx, xpat
+
+                return
+            assert v.ndim == x.ndim + 1
+            new_order = [0] + ['x' if ii == 'x' else (ii + 1)
+                         for ii in xpat]
+            vn = v.dimshuffle(*new_order)
+
+            new_idx = [slice(None, None, None) for ii in new_order]
+            for ii, idx in enumerate(vidx):
+                ni = new_order.index(ii)
+                new_idx[ni] = idx
+            while new_idx[-1] == slice(None, None, None):
+                new_idx.pop()
+
+            #print 'x', vidx, xpat, '->', 'x', new_order, new_idx
+            return [vn.__getitem__(*new_idx)]
+
+#@register_canonicalize
+@local_optimizer()
+def logpy_join(node):
+    if isinstance(node.op, tensor.Join):
+        axis = node.inputs[0]
+        tsrs = node.inputs[1:]
+        if len(tsrs) < 2:
+            return
+
+        for i, (t0, t1) in enumerate(zip(tsrs[:-1], tsrs[1:])):
+            reb_op = tensor.Rebroadcast((0, 0))
+            x0 = reb_op(t0.type())
+            x1 = reb_op(t1.type())
+            op0 = var('op0')
+            with variables(x0, x1):
+                op(x[i], x[i+1])
+                match = run(
+                    1, [x0, x1, op0],
+                    (eq, [t0, t1], [reb_op(x0), reb_op(x1)]),
+                    (getattrreco, (x0, 'owner', 'op'), op0),
+                    (getattrreco, (x1, 'owner', 'op'), op0),
+                    (isinstanceo, op0, tensor.Elemwise),
+
+                   )
+                if match:
+                    print 'MATCH', match
+                else:
+                    return
+
+
+#@register_canonicalize
+@local_optimizer()
+def logpy_lift_reshape_through_subtensor(node):
+    if isinstance(node.op, tensor.Reshape):
+        x = node.inputs[0]
+        if x.owner and isinstance(x.owner.op, tensor.Subtensor):
+            v = x.owner.inputs[0]
+            if len(x.owner.inputs) > 1:
+                # TODO
+                return
+            vidx = x.owner.op.idx_list
+            if not len(vidx) == 1:
+                # TODO
+                return
+            wtf = [v.shape[0]] + node.inputs[1:]
+            return [v.reshape(wtf, ndim=len(wtf)).__getitem__(vidx[0])]
+
+
+if 0:
+
+    from logpy import fact, Relation
+
+    x = tensor.vector('x')
+    from theano.tensor import exp, log
+    rules = [
+            (x + x, 2*x),
+            (x * x, x**2),
+            (exp(log(x)), x),
+            (log(exp(x)), x),
+            ]
+    vars = [x]
+    reduces = Relation('reduces')
+    for source, target in rules:
+        fact(reduces, source, target)
+
+    def simplify(expr):
+        source, target = var(), var()
+        with variables(*vars):
+            result = run(0, target, (reduces, source, target),
+                                    (eq, expr, source))
+        return result
 
