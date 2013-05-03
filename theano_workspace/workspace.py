@@ -1,6 +1,7 @@
 import copy
 import sys
 import time
+from collections import OrderedDict
 
 import numpy as np
 
@@ -37,23 +38,26 @@ class UpdateFGraph(object):
             replace=givens,
             rebuild_strict=True,
             copy_inputs_over=True)
-        _inputs, unique_outputs_w_givens, other_stuff = stuff
+        _inputs, unique_outputs_w_giv, other_stuff = stuff
         clone_equiv1, _update_d, _update_expr, _shared_inputs = other_stuff
 
-        all_inputs = theano.gof.graph.inputs(unique_outputs_w_givens + _inputs)
+        all_inputs = theano.gof.graph.inputs(unique_outputs_w_giv + _inputs)
 
         # -- full graph clone to protect original graph
-        clone_equiv = {}
+        clone_equiv = {} # -- do not need order here
         theano.gof.graph.clone_get_equiv(
-            all_inputs,
-            unique_outputs_w_givens,
+            [],
+            unique_outputs_w_giv + _inputs,
             copy_inputs_and_orphans=True,
             memo=clone_equiv)
+        # -- redirect through the second clone
         for orig_var in clone_equiv1:
-            clone_equiv[orig_var] = clone_equiv[clone_equiv1[orig_var]]
+            tmp = clone_equiv1[orig_var]
+            if tmp in clone_equiv:
+                clone_equiv[orig_var] = clone_equiv[tmp]
         self.cloned_inputs = [clone_equiv[var] for var in all_inputs]
         self.cloned_dests = [clone_equiv[var] for var in dests]
-        self.cloned_outputs = [clone_equiv[var] for var in unique_outputs_w_givens]
+        self.cloned_outputs = [clone_equiv[var] for var in unique_outputs_w_giv]
         fgraph = theano.gof.fg.FunctionGraph(
             self.cloned_inputs,
             self.cloned_outputs)
@@ -62,7 +66,8 @@ class UpdateFGraph(object):
         for node in fgraph.apply_nodes:
             if getattr(node.op, 'destroy_map', None):
                 if not accept_inplace:
-                    raise TypeError("Graph must not contain inplace operations", node, node.op)
+                    raise TypeError("Graph must not contain inplace operations",
+                                    node, node.op)
                 else:
                     fgraph.attach_feature(theano.gof.DestroyHandler())
                     break
@@ -83,11 +88,11 @@ class UpdateFGraph(object):
 
         # -- pre-install the shape information from the Hints created by
         #    e.g. SharedStorageWorkspace
-        done = {}
+        done = {} # -- no order ok
         for node in fgraph.toposort():
             if is_hint_node(node):
                 if node.inputs[0] in done: continue
-                hints = dict(node.op.hints)
+                hints = OrderedDict(node.op.hints)
                 if 'shape' in hints:
                     x = node.inputs[0]
                     assert x.ndim == len(hints['shape'])
@@ -123,42 +128,42 @@ class CompiledUpdate(object):
         linker = VM_Linker(**VM_Linker_kwargs)
         no_recycling = infer_reuse_pattern(ufgraph.fgraph, ufgraph.fgraph.outputs)
         linker.accept(ufgraph.fgraph, no_recycling=no_recycling)
-        linker.accept_var_updates(dict(zip(
+        linker.accept_var_updates(OrderedDict(zip(
             ufgraph.cloned_dests,
             ufgraph.cloned_outputs)))
 
         input_storage = [vals_memo[i] if i in vals_memo else [i.data]
                 for i in ufgraph.all_inputs]
 
+        vm, input_containers, output_containers, thunks, order = linker.make_all(
+            profiler=None, # -- currently unused
+            input_storage=input_storage,
+            )
+
         self.ufgraph = ufgraph
         self.vals_memo = vals_memo
         self.input_storage = input_storage
-        self.linker = linker
+        self.vm = vm
+        self.input_containers = input_containers
+        self.output_containers = output_containers
+        self.thunks = thunks
+        self.order = order
         self.profiler = profiler  # -- sets vm, etc.
 
     def _get_profiler(self):
         return self._profiler
 
     def _set_profiler(self, profiler):
-        make_all = self.linker.make_all
-        vm, input_containers, output_containers, thunks, order = make_all(
-            profiler=profiler,
-            input_storage=self.input_storage,
-            )
-        self.vm = vm
-        self.input_containers = input_containers
-        self.output_containers = output_containers
-        self.thunks = thunks
-        self.order = order
         self._profiler = profiler
-
+        if profiler:
+            self.vm.time_thunks = profiler.flag_time_thunks
 
     profiler = property(_get_profiler, _set_profiler)
 
     def __call__(self):
         # if profiler then we need to update it (see function_module.py:641)
-        if self.profiler:
-            prof = self.profiler
+        prof = self._profiler
+        if prof:
             t0 = time.time()
             self.vm()
             t1 = time.time()
@@ -191,13 +196,18 @@ class SimpleWorkspace(object):
     """
 
     def __init__(self):
-        self.vals_memo = {}
-        self.compiled_updates = {}
+        self.vals_memo = OrderedDict()
+        self.compiled_updates = OrderedDict()
+
+    def __len__(self):
+        return len(self.vals_memo)
 
     def __iter__(self):
-        return self.vals_memo.keys()
+        return iter(self.vals_memo)
 
     def __contains__(self, key):
+        if not isinstance(key, theano.gof.Variable):
+            raise TypeError
         return key in self.vals_memo
 
     def __getitem__(self, key):
@@ -209,6 +219,13 @@ class SimpleWorkspace(object):
             self.vals_memo[key][0] = filtered_val
         else:
             self.vals_memo[key] = [filtered_val]
+
+    def items(self):
+        return list(self.iteritems())
+
+    def iteritems(self):
+        for key in self.vals_memo:
+            yield key, self.vals_memo[key][0]
 
     def update(self, other):
         for key in other:
@@ -257,31 +274,59 @@ class SimpleWorkspace(object):
 class ViewWorkspace(SimpleWorkspace):
     def __init__(self, ws):
         SimpleWorkspace.__init__(self)
+        def shp(v):
+            return ws.vals_memo[v][0].shape
 
-        self.views_memo = {}
+        for v, vcell in ws.vals_memo.items():
+            self.vals_memo[v] = copy.deepcopy(vcell)
 
-        # set up some views
-        self.s_fvector = theano.tensor.vector('fvector')
-        vectors = [var for var in ws.vals_memo
-                if var.type == self.s_fvector.type]
-        if vectors:
-            fvector = np.concatenate(
-                    [ws.vals_memo[var][0] for var in vectors]).astype('float32')
-            offset = 0
-            for var in vectors:
-                self.views_memo[var] = (
-                        self.s_fvector,
-                        offset,
-                        len(ws.vals_memo[var][0]))
-                offset += len(ws.vals_memo[var][0])
-            self.vals_memo[self.s_fvector] = [fvector]
+        self.views_memo = OrderedDict()
+
+        v_by_name = OrderedDict((v.name, v) for v in ws)
+        if len(v_by_name) != len(ws):
+            tmp = list([v.name for v in ws])
+            for name in v_by_name:
+                tmp.remove(name)
+            print tmp
+            raise NotImplementedError('view logic uses names')
+
+        cu = ws.compiled_updates.values()[0] # XXX not deterministic
+        ceq = cu.ufgraph.clone_equiv
+        v_by_use = OrderedDict()
+        for v in ws:  # XXX not deterministic
+            if v not in ceq or not ceq[v]:
+                continue
+            clops = tuple((n.op, p) for n, p in ceq[v].clients)
+            key = v.type, shp(v), clops
+            v_by_use.setdefault(key, []).append(v.name)
+
+        for lst in v_by_use.values():
+            # extremely hacky way to line up corresponding
+            # variables ... make sure that all vars in a motif
+            # have a common and distinguishing beginning-of-name
+            lst.sort()
+
+        # XXX not deterministic
+        for key, vbn in v_by_use.items():
+            if len(vbn) <= 1:
+                continue
+            # print key
+            # print ' ', vbn
+            nda = np.concatenate(
+                [ws.vals_memo[v_by_name[name]][0][None,:] for name in vbn])
+            nda = np.asarray(nda, key[0].dtype)
+            nda_vtype = theano.tensor.TensorType(
+                dtype=key[0].dtype,
+                broadcastable=tuple(si == 1 for si in nda.shape))
+            nda_var =  nda_vtype(name='holder{%s, %s}' % (
+                nda.dtype, nda.shape))
+            self.vals_memo[nda_var] = [nda]
+            for i, name in enumerate(vbn):
+                v = v_by_name[name]
+                self.views_memo[v] = (nda_var, i)
+                del self.vals_memo[v]
 
         #print self.views_memo
-
-        # set up some normal values
-        for var in ws.vals_memo:
-            if var not in self.views_memo:
-                self.vals_memo[var] = copy.deepcopy(ws.vals_memo[var])
 
         for fname, f in ws.compiled_updates.items():
             self.add_method(fname, updates=f.ufgraph.updated_vars)
@@ -291,8 +336,8 @@ class ViewWorkspace(SimpleWorkspace):
 
     def __getitem__(self, key):
         if key in self.views_memo:
-            var, offset, n = self.views_memo[key]
-            return self[var][offset: offset + n]
+            var, idx = self.views_memo[key]
+            return self[var][idx]
         else:
             return self.vals_memo[key][0]
 
@@ -300,8 +345,8 @@ class ViewWorkspace(SimpleWorkspace):
         filtered_val = key.type.filter(val, strict=False, allow_downcast=True)
 
         if key in self.views_memo:
-            var, offset, n = self.views_memo[key]
-            self.vals_memo[var][0][offset: offset + n] = filtered_val
+            var, idx = self.views_memo[key]
+            self.vals_memo[var][0][idx] = filtered_val
         else:
             if key in self.vals_memo:
                 self.vals_memo[key][0] = filtered_val
@@ -315,18 +360,19 @@ class ViewWorkspace(SimpleWorkspace):
         givens=None,
         optimizer=None,
         ):
-        noview_updates = dict() #XXX want ordered-dict here
+        noview_updates = OrderedDict()
         for dst, out in updates:
             if dst in self.views_memo:
-                var, offset, n_elems = self.views_memo[dst]
+                var, idx = self.views_memo[dst]
                 # -- build the shape into the graph
                 #shp = self.vals_memo[var][0].shape
                 # print 'shp', shp
                 upvar = noview_updates.get(var, var)
                 upvar = theano.tensor.set_subtensor(
-                        upvar[offset: offset + n_elems],
+                        upvar[idx],
                         out)
                 noview_updates[var] = upvar
+                assert var.owner is None
             else:
                 if dst in noview_updates:
                     raise ValueError('duplicate destination', updated_vals)
@@ -334,10 +380,13 @@ class ViewWorkspace(SimpleWorkspace):
 
         givens = []
         for var in self.views_memo:
-            svar, offset, n_elems = self.views_memo[var]
+            svar, idx = self.views_memo[var]
             shp = self.vals_memo[svar][0].shape
-            svar = Hint(shape=shp)(svar)
-            givens.append((var, svar[offset: offset + n_elems]))
+            uvar = theano.tensor.patternbroadcast(
+                Hint(shape=shp)(svar)[idx],
+                var.broadcastable)
+            assert var.type == uvar.type, (var.type, uvar.type)
+            givens.append((var, uvar))
 
         ufgraph = UpdateFGraph(noview_updates.items(), givens=givens)
         cu = CompiledUpdate(ufgraph, self.vals_memo)

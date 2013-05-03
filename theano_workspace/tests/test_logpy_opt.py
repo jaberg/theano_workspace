@@ -100,3 +100,12 @@ def test_slice_sanity():
     bar = Bar(4)
     bar.token = 'hello'
     assert not slice(5) == slice(bar)
+
+def test_context_type_not_matter():
+    x1 = theano.tensor.fmatrix() # -- type doesn't really matter
+    y1 = theano.tensor.fmatrix() # -- type doesn't really matter
+    x2 = theano.tensor.dmatrix() # -- type doesn't really matter
+    y2 = theano.tensor.dmatrix() # -- type doesn't really matter
+
+    with variables(x2, y2):
+        assert run(1, (x2, y2), (eq, tensor.dot(x1, y1).owner, tensor.dot(x2, y2).owner))
